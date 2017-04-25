@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <sys/prctl.h>
 
 #define MAXSUBPROCS 1024
 
@@ -24,8 +25,15 @@ struct process {
 struct process children[MAXSUBPROCS];
 int num_children = 0;
 
+char *enabled_services[MAXSUBPROCS];
+int num_enabled_services;
+
+int disabled_services[MAXSUBPROCS];
+int num_disabled_services;
+
 int scan_directory(char *dir);
 void mark_for_supervision(char *dir, char *nm);
+void disable_process(int i);
 void check_on_process(struct process *p);
 void launch_process(struct process *p);
 
@@ -33,13 +41,13 @@ int main(int argc, char **argv) {
 	pid_t pid;
 
 	if(argc != 2) {
-		puts("Usage ./t <directory>");
+		printf("Usage %s <directory>", argv[0]);
 		return -1;
 	}
 
 	fprintf(stdout, "Supervising directory <%s>\n", argv[1]);
 	
-	if(scan_directory(argv[1])) {
+ 	if(scan_directory(argv[1])) {
 		fprintf(stdout, "Could not scan directory.\n");
 		return -1;
 	}
@@ -51,27 +59,85 @@ int main(int argc, char **argv) {
 		}
 		
 		sleep(1);
+		scan_directory(argv[1]);
 	}
 	
 	return 0;
 }
 
 int scan_directory(char *dir) {
+	// The algorithm here for a rescan is based on 'diffing'
+	// what services we currently have against what we see
+	// in the enabled directory.
+	//
+	// To do that we start with an empty list of newly 'enabled'
+	// services which will be added to, and a full list of
+	// 'disabled' services which will be removed from.
+	
 	DIR *d;
 	struct dirent *ent;
+
+	num_enabled_services = 0;
+	num_disabled_services = num_children;
+	for(int i = 0; i < num_children; i++) {
+		if(!children[i].garbage) {
+			disabled_services[i] = i;
+		}
+		else {
+			disabled_services[i] = -1;
+		}
+	}
 	
 	if(!(d = opendir(dir))) return 1;
 	while(ent = readdir(d)) {
 		if(ent->d_type == DT_DIR) {
 			if(!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, ".."))
 				continue;
+
+			// check if the directory is in our list
+			// if yes remove it from disabled
+			// if no add it to enabled
+
+			int seen = 0;
 			
-			fprintf(stdout, "Supervising program <%s>\n", ent->d_name);
-		        mark_for_supervision(dir, ent->d_name);
+			for (int i = 0; i < num_children; i++) {
+				if (children[i].garbage)
+					continue;
+				
+				if(!strncmp(children[i].name, ent->d_name, 1024)) {
+					disabled_services[i] = -1;
+					seen = 1;
+					break;
+				}
+			}
+
+			if(!seen) {
+				enabled_services[num_enabled_services] = ent->d_name;
+				num_enabled_services++;
+			}
 		}
 	}
-	closedir(d);
 
+	// supervise all newly enabled services
+	// take down all disabled services
+
+	// mark disabled children as garbage
+	for (int i = 0; i < num_disabled_services; i++) {
+		if(disabled_services[i] != -1) {
+			fprintf(stdout, "Disabling service <%s>\n", children[i].name);
+			disable_process(i);
+		}
+		
+	}
+
+	// supervise new processes
+	for (int i = 0; i < num_enabled_services; i++) {
+		fprintf(stdout, "Enabling service <%s>\n", enabled_services[i]);
+		mark_for_supervision(dir, enabled_services[i]);
+	}
+	
+	closedir(d);
+	
 	return 0;
 }
 
@@ -102,6 +168,24 @@ void mark_for_supervision(char *dir, char *nm) {
 	
         mark_for_supervision_at_index(dir, nm, num_children);
 	num_children++;
+}
+
+void disable_process(int i) {
+	children[i].garbage = 1;
+
+	free(children[i].name);
+	free(children[i].run);
+	free(children[i].stdout);
+	free(children[i].stderr);
+
+	children[i].name = NULL;
+	children[i].run = NULL;
+	children[i].stdout = NULL;
+	children[i].stderr = NULL;
+
+	kill(children[i].pid, SIGKILL);
+	
+	children[i].pid = 0;
 }
 
 void check_on_process(struct process *p) {
@@ -159,6 +243,8 @@ void launch_process(struct process *p) {
 		return;
 	}
 	else {
+		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		
 		dup2(fd1, 1);
 		dup2(fd2, 2);
 		
