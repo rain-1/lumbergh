@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <sys/prctl.h>
+#include <errno.h>
 
 #define MAXSUBPROCS 1024
 
@@ -91,7 +92,18 @@ int scan_directory(char *dir) {
 	}
 	
 	if(!(d = opendir(dir))) return 1;
-	while(ent = readdir(d)) {
+	
+	while(1) {
+		errno = 0;
+		ent = readdir(d);
+		if(!ent) {
+			if(errno) {
+				fprintf(stderr, "Error reading directory <%s>\n", strerror(errno));
+			}
+			
+			break;
+		}
+		
 		if(ent->d_type == DT_DIR) {
 			if(!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, ".."))
 				continue;
@@ -223,17 +235,28 @@ void launch_process(struct process *p) {
 	fprintf(stdout, "launching process <%s>\n", p->name);
 	
 	fd1 = open(p->stdout, O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR);
-	fd2 = open(p->stderr, O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR);
-	
-	if(fd1 == -1 || fd2 == -1) {
-		fprintf(stdout, "Critical Error: Unable to log for program <%s>.\n", p->name);
+	if(fd1 == -1) {
+		fprintf(stdout, "Critical Error: Unable to stdout log for program <%s>.\n", p->name);
 		return;
 	}
 
+	fd2 = open(p->stderr, O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR);
+	if(fd2 == -1) {
+		close(fd1);
+		
+		fprintf(stdout, "Critical Error: Unable to stderr log for program <%s>.\n", p->name);
+		return;
+	}
+	
 	// TODO: make sure p->run actually exists
+	
 	pid = fork();
 	if(pid == -1) {
 		fprintf(stdout, "Critical Error: Unable to fork.\n");
+		
+		close(fd1);
+		close(fd2);
+		
 		return;
 	}
 	else if(pid) {
