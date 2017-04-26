@@ -46,7 +46,9 @@ int main(int argc, char **argv) {
 	}
 
 	fprintf(stdout, "Supervising directory <%s>\n", argv[1]);
-	
+
+	setsid();
+
  	if(scan_directory(argv[1])) {
 		fprintf(stdout, "Could not scan directory.\n");
 		return -1;
@@ -183,7 +185,8 @@ void disable_process(int i) {
 	children[i].stdout = NULL;
 	children[i].stderr = NULL;
 
-	kill(children[i].pid, SIGKILL);
+	kill(-children[i].pid, SIGKILL);
+	waitpid(children[i].pid, NULL, 0);
 	
 	children[i].pid = 0;
 }
@@ -243,7 +246,7 @@ void launch_process(struct process *p) {
 		return;
 	}
 	else {
-		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		setpgrp();
 		
 		dup2(fd1, 1);
 		dup2(fd2, 2);
