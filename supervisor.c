@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
 	pid_t pid;
 
 	if(argc != 2) {
-		printf("Usage %s <directory>", argv[0]);
+		printf("Usage %s <directory>\n", argv[0]);
 		return -1;
 	}
 
@@ -229,7 +229,8 @@ void launch_process(struct process *p) {
 		fprintf(stdout, "Critical Error: Unable to log for program <%s>.\n", p->name);
 		return;
 	}
-	
+
+	// TODO: make sure p->run actually exists
 	pid = fork();
 	if(pid == -1) {
 		fprintf(stdout, "Critical Error: Unable to fork.\n");
