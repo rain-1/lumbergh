@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -23,6 +24,8 @@ struct process {
 	pid_t pid;
 };
 
+int close_down;
+
 struct process children[MAXSUBPROCS];
 int num_children = 0;
 
@@ -38,6 +41,11 @@ void disable_process(int i);
 void check_on_process(struct process *p);
 void launch_process(struct process *p);
 
+void trap_sigint(int sig) {
+	fprintf(stdout, "supervisor closing down..\n");
+	close_down = 1;
+}
+
 int main(int argc, char **argv) {
 	pid_t pid;
 
@@ -48,7 +56,9 @@ int main(int argc, char **argv) {
 
 	fprintf(stdout, "Supervising directory <%s>\n", argv[1]);
 
-	setsid();
+//	setsid();
+	close_down = 0;
+	signal(SIGINT, trap_sigint);
 
  	if(scan_directory(argv[1])) {
 		fprintf(stdout, "Could not scan directory.\n");
@@ -56,6 +66,16 @@ int main(int argc, char **argv) {
 	}
 
 	while(1) {
+		if(close_down) {
+			for(int i = 0; i < num_children; i++) {
+				if(!children[i].garbage) {
+					fprintf(stdout, "Disabling service <%s>\n", children[i].name);
+					disable_process(i);
+				}
+			}
+			return 0;
+		}
+		
 		for(int i = 0; i < num_children; i++) {
 			if(!children[i].garbage)
 				check_on_process(&children[i]);
@@ -197,7 +217,7 @@ void disable_process(int i) {
 	children[i].stdout = NULL;
 	children[i].stderr = NULL;
 
-	kill(-children[i].pid, SIGKILL);
+	kill(-children[i].pid, SIGINT);
 	waitpid(children[i].pid, NULL, 0);
 	
 	children[i].pid = 0;
@@ -270,7 +290,7 @@ void launch_process(struct process *p) {
 		return;
 	}
 	else {
-		setpgrp();
+//		setpgrp();
 		
 		dup2(fd1, 1);
 		dup2(fd2, 2);
