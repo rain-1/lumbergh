@@ -24,6 +24,8 @@ struct process {
 	pid_t pid;
 };
 
+int process_group_id;
+
 int close_down;
 
 struct process children[MAXSUBPROCS];
@@ -41,10 +43,12 @@ void disable_process(int i);
 void check_on_process(struct process *p);
 void launch_process(struct process *p);
 
+/*
 void trap_sigint(int sig) {
 	fprintf(stdout, "supervisor closing down..\n");
 	close_down = 1;
 }
+*/
 
 int main(int argc, char **argv) {
 	pid_t pid;
@@ -54,11 +58,12 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 
+	fprintf(stdout, "Supervisor %d\n", getpid());
 	fprintf(stdout, "Supervising directory <%s>\n", argv[1]);
 
-//	setsid();
+	process_group_id = getpgrp();
 	close_down = 0;
-	signal(SIGINT, trap_sigint);
+//	signal(SIGINT, trap_sigint);
 
  	if(scan_directory(argv[1])) {
 		fprintf(stdout, "Could not scan directory.\n");
@@ -283,14 +288,15 @@ void launch_process(struct process *p) {
 		// parent
 		p->pid = pid;
 		fprintf(stdout, "<%s> started with pid %d.\n", p->name, pid);
-
+		setpgid(pid, process_group_id);
+		
 		close(fd1);
 		close(fd2);
 		
 		return;
 	}
 	else {
-//		setpgrp();
+		setpgid(0, process_group_id); // APUE 9.4 says both parent and child should setpgid to avoid race
 		
 		dup2(fd1, 1);
 		dup2(fd2, 2);
