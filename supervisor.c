@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
 		if(close_down) {
 			for(int i = 0; i < num_children; i++) {
 				if(!children[i].garbage) {
-					fprintf(stdout, "Disabling service <%s>\n", children[i].name);
+					fprintf(stdout, "Disabling service <%s> %d\n", children[i].name, children[i].pid);
 					disable_process(i);
 				}
 			}
@@ -222,10 +222,13 @@ void disable_process(int i) {
 	children[i].stdout = NULL;
 	children[i].stderr = NULL;
 
-	kill(-children[i].pid, SIGINT);
+	kill(children[i].pid, SIGINT);
+	kill(children[i].pid, SIGTERM);
 	waitpid(children[i].pid, NULL, 0);
 	
 	children[i].pid = 0;
+	
+	puts("!");
 }
 
 void check_on_process(struct process *p) {
